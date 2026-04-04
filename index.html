@@ -41,7 +41,6 @@
         const auth = getAuth(app);
         const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-        // Иконки в виде SVG путей
         const ICONS = {
             paperclip: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
             arrow: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>`,
@@ -62,7 +61,6 @@
             const [password, setPassword] = React.useState('');
             const [authMode, setAuthMode] = React.useState('LOGIN');
 
-            // Обработка входа через Яндекс (токен в URL)
             React.useEffect(() => {
                 const hash = window.location.hash;
                 if (hash.includes('access_token=')) {
@@ -133,13 +131,6 @@
                 window.location.href = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirect}`;
             };
 
-            const handleLogout = () => {
-                signOut(auth);
-                setUser(null);
-                localStorage.removeItem('grishka_user');
-                setShowAuth(false);
-            };
-
             return html`
                 <div class="max-w-2xl mx-auto py-12 px-6">
                     <header class="flex justify-between items-center mb-12">
@@ -148,7 +139,7 @@
                             Сгенерируй фото <span class="italic font-medium text-slate-400">вместе с Гришкой AI</span>
                         </h1>
                         <button onClick=${() => setShowAuth(true)} class="w-10 h-10 bg-white border border-slate-100 rounded-full flex items-center justify-center overflow-hidden shadow-sm hover:scale-105 transition-transform">
-                            ${user?.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : (user ? html`<div class="w-full h-full bg-black text-white flex items-center justify-center font-bold">${user.displayName?.[0] || user.email?.[0]}</div>` : ICONS.user)}
+                            ${user?.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : (user ? html`<div class="w-full h-full bg-black text-white flex items-center justify-center font-bold">${(user.displayName || user.email)?.[0]}</div>` : ICONS.user)}
                         </button>
                     </header>
 
@@ -221,13 +212,13 @@
                             ${user ? html`
                                 <div class="text-center space-y-6">
                                     <div class="w-24 h-24 rounded-full mx-auto border-4 border-slate-50 shadow-md overflow-hidden bg-black flex items-center justify-center">
-                                        ${user.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : html`<span class="text-white text-3xl font-bold">${user.displayName?.[0] || user.email?.[0]}</span>`}
+                                        ${user.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : html`<span class="text-white text-3xl font-bold">${(user.displayName || user.email)?.[0]}</span>`}
                                     </div>
                                     <div>
                                         <p class="font-bold text-xl">${user.displayName || 'Пользователь'}</p>
                                         <p class="text-slate-400 text-sm">${user.email}</p>
                                     </div>
-                                    <button onClick=${handleLogout} class="w-full bg-slate-100 py-5 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 transition-all">Выйти из аккаунта</button>
+                                    <button onClick=${() => { signOut(auth); setUser(null); localStorage.removeItem('grishka_user'); setShowAuth(false); }} class="w-full bg-slate-100 py-5 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 transition-all">Выйти из аккаунта</button>
                                 </div>
                             ` : html`
                                 <div class="space-y-4">
