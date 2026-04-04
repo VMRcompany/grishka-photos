@@ -1,0 +1,223 @@
+<!-- Сохраните этот код как index.html -->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Гришка AI — Фотогенератор</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .animate-in { animation: fadeIn 0.5s both; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-thumb { background: #e2e8f0; border-radius: 10px; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+    <div id="root"></div>
+
+    <!-- Библиотеки -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    
+    <!-- Firebase -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, doc, collection, addDoc, query, orderBy, limit, onSnapshot, getDocs, writeBatch, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { GoogleGenAI } from "https://esm.run/@google/genai";
+
+        const html = htm.bind(React.createElement);
+
+        // КОНФИГУРАЦИЯ FIREBASE
+        const firebaseConfig = {
+            projectId: "gen-lang-client-0020876863",
+            appId: "1:1028257117288:web:c4b079e2ccf1becbc177dd",
+            apiKey: "AIzaSyC-Ot04UT6IYPH9M0kS54srXu6eI9UgmqQ",
+            authDomain: "gen-lang-client-0020876863.firebaseapp.com",
+            firestoreDatabaseId: "ai-studio-fdfe8765-0683-4757-9205-f80f35a2bddd"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+        function App() {
+            const [prompt, setPrompt] = React.useState('');
+            const [status, setStatus] = React.useState('IDLE');
+            const [result, setResult] = React.useState(null);
+            const [user, setUser] = React.useState(null);
+            const [history, setHistory] = React.useState([]);
+            const [showAuth, setShowAuth] = React.useState(false);
+            const [authMode, setAuthMode] = React.useState('LOGIN');
+            const [email, setEmail] = React.useState('');
+            const [password, setPassword] = React.useState('');
+
+            // Иконки Lucide
+            const Icon = ({ name, size = 20, className = "" }) => {
+                const ref = React.useRef(null);
+                React.useEffect(() => {
+                    if (ref.current) {
+                        const icon = lucide.icons[name];
+                        if (icon) {
+                            const svg = lucide.createIcons({ icons: { [name]: icon } });
+                        }
+                    }
+                }, [name]);
+                return html`<i data-lucide=${name} class=${className} style=${{ width: size, height: size }}></i>`;
+            };
+
+            React.useEffect(() => {
+                const unsub = onAuthStateChanged(auth, (u) => {
+                    setUser(u);
+                    if (!u) {
+                        const local = JSON.parse(localStorage.getItem('grishka_history') || '[]');
+                        setHistory(local);
+                    }
+                });
+                return unsub;
+            }, []);
+
+            React.useEffect(() => {
+                if (!user) return;
+                const q = query(collection(db, 'users', user.uid, 'history'), orderBy('timestamp', 'desc'), limit(20));
+                return onSnapshot(q, (snap) => {
+                    const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+                    setHistory(docs);
+                });
+            }, [user]);
+
+            const handleGenerate = async () => {
+                if (!prompt.trim()) return;
+                setStatus('LOADING');
+                try {
+                    const genAI = new GoogleGenAI({ apiKey: "AIzaSyDvZAYpV2mCE3fy1Ni4qi5UBZv0ht71bsI" });
+                    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-image" });
+                    
+                    const res = await model.generateContent(prompt);
+                    const part = res.response.candidates[0].content.parts.find(p => p.inlineData);
+                    const url = `data:image/png;base64,${part.inlineData.data}`;
+                    
+                    const newGen = { prompt, url, timestamp: Date.now() };
+                    setResult(newGen);
+
+                    if (user) {
+                        // В Firestore сохраняем ТОЛЬКО промт, чтобы не превысить 1МБ
+                        await addDoc(collection(db, 'users', user.uid, 'history'), {
+                            prompt,
+                            timestamp: serverTimestamp()
+                        });
+                    } else {
+                        const newHist = [newGen, ...history].slice(0, 10);
+                        setHistory(newHist);
+                        localStorage.setItem('grishka_history', JSON.stringify(newHist));
+                    }
+                    setStatus('SUCCESS');
+                } catch (e) {
+                    console.error(e);
+                    setStatus('ERROR');
+                }
+            };
+
+            const handleYandexLogin = () => {
+                const clientId = "ВАШ_ID_ИЗ_ЯНДЕКС_ID"; // Нужно создать на oauth.yandex.ru
+                const redirectUri = "https://grishka-photos.vercel.app/";
+                window.location.href = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirectUri}`;
+            };
+
+            return html`
+                <div class="max-w-2xl mx-auto py-10 px-6">
+                    <header class="flex justify-between items-center mb-10 animate-in">
+                        <h1 class="text-3xl font-black tracking-tight">Гришка <span class="text-slate-400 font-medium">AI</span></h1>
+                        <button onClick=${() => setShowAuth(true)} class="w-10 h-10 bg-white shadow-sm border rounded-full flex items-center justify-center hover:bg-slate-50 transition-all">
+                            ${user ? html`<img src=${user.photoURL || 'https://ui-avatars.com/api/?name=' + user.email} class="rounded-full w-full h-full" />` : html`<${Icon} name="user" />`}
+                        </button>
+                    </header>
+
+                    <div class="bg-white p-2 rounded-3xl shadow-xl border flex items-center mb-10">
+                        <input 
+                            value=${prompt} 
+                            onChange=${(e) => setPrompt(e.target.value)}
+                            placeholder="Опиши фото мечты..." 
+                            class="flex-1 px-4 py-3 outline-none text-lg font-medium"
+                        />
+                        <button onClick=${handleGenerate} class="bg-black text-white p-4 rounded-2xl hover:opacity-80 transition-all">
+                            ${status === 'LOADING' ? html`<${Icon} name="refresh-cw" className="animate-spin" />` : html`<${Icon} name="arrow-right" />`}
+                        </button>
+                    </div>
+
+                    <div class="min-h-[300px]">
+                        ${status === 'LOADING' && html`
+                            <div class="flex flex-col items-center py-20 animate-pulse">
+                                <div class="w-12 h-12 border-4 border-black border-t-transparent rounded-full animate-spin mb-4"></div>
+                                <p class="text-xs font-bold text-slate-400 uppercase tracking-widest">Гришка колдует...</p>
+                            </div>
+                        `}
+                        
+                        ${status === 'SUCCESS' && result && html`
+                            <div class="animate-in">
+                                <img src=${result.url} class="w-full rounded-[2.5rem] shadow-2xl border mb-4" />
+                                <div class="flex justify-center">
+                                    <button onClick=${() => setStatus('IDLE')} class="text-[10px] font-bold text-slate-300 uppercase tracking-widest hover:text-black transition-colors">Начать заново</button>
+                                </div>
+                            </div>
+                        `}
+                    </div>
+
+                    ${history.length > 0 && html`
+                        <div class="mt-20">
+                            <h2 class="text-[10px] font-bold text-slate-400 uppercase tracking-[0.3em] mb-6">История</h2>
+                            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                ${history.map(item => html`
+                                    <div onClick=${() => { setPrompt(item.prompt); window.scrollTo(0,0); }} class="bg-white p-4 rounded-2xl border hover:border-black cursor-pointer transition-all group">
+                                        ${item.url ? html`<img src=${item.url} class="w-full aspect-square object-cover rounded-xl mb-2" />` : html`<div class="aspect-square bg-slate-50 rounded-xl mb-2 flex items-center justify-center"><${Icon} name="image" className="text-slate-200" /></div>`}
+                                        <p class="text-[10px] font-medium text-slate-500 line-clamp-2">${item.prompt}</p>
+                                    </div>
+                                `)}
+                            </div>
+                        </div>
+                    `}
+                </div>
+
+                ${showAuth && html`
+                    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in">
+                        <div class="bg-white w-full max-w-md rounded-[2.5rem] p-8 shadow-2xl">
+                            <div class="flex justify-between mb-8">
+                                <h2 class="text-xl font-bold">Аккаунт</h2>
+                                <button onClick=${() => setShowAuth(false)}><${Icon} name="x" /></button>
+                            </div>
+                            
+                            ${user ? html`
+                                <div class="text-center">
+                                    <p class="font-bold mb-4">${user.email}</p>
+                                    <button onClick=${() => signOut(auth)} class="w-full bg-slate-100 py-4 rounded-2xl font-bold">Выйти</button>
+                                </div>
+                            ` : html`
+                                <div class="space-y-4">
+                                    <button onClick=${() => signInWithPopup(auth, new GoogleAuthProvider())} class="w-full border py-4 rounded-2xl font-bold flex items-center justify-center gap-3">
+                                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-5" /> Google
+                                    </button>
+                                    <button onClick=${handleYandexLogin} class="w-full bg-[#ff0000] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-3">
+                                        <span class="font-black">Я</span> Яндекс
+                                    </button>
+                                    <div class="text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">или почта</div>
+                                    <input placeholder="Email" class="w-full bg-slate-50 p-4 rounded-2xl outline-none" onChange=${e => setEmail(e.target.value)} />
+                                    <input type="password" placeholder="Пароль" class="w-full bg-slate-50 p-4 rounded-2xl outline-none" onChange=${e => setPassword(e.target.value)} />
+                                    <button onClick=${() => signInWithEmailAndPassword(auth, email, password)} class="w-full bg-black text-white py-4 rounded-2xl font-bold">Войти</button>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `}
+            `;
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(html`<${App} />`);
+    </script>
+</body>
+</html>
