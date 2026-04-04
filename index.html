@@ -8,12 +8,12 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
-        .animate-in { animation: fadeIn 0.4s both; }
+        .animate-in { animation: fadeIn 0.3s both; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
         .glass-input { background: white; border: 1px solid #f1f5f9; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.05); }
         .input-shadow { box-shadow: 0 10px 30px -10px rgba(0,0,0,0.1); }
-        .circle-btn { width: 48px; height: 48px; border-radius: 50% !important; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-        .profile-btn { width: 40px; height: 40px; border-radius: 50% !important; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .circle-btn { width: 48px; height: 48px; border-radius: 9999px !important; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .profile-btn { width: 40px; height: 40px; border-radius: 9999px !important; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 50; }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-900 min-h-screen">
@@ -76,15 +76,15 @@
                         .then(data => {
                             const yandexUser = {
                                 uid: 'yandex_' + data.id,
-                                displayName: data.real_name || data.display_name,
-                                email: data.default_email,
+                                displayName: data.real_name || data.display_name || 'Пользователь Яндекса',
+                                email: data.default_email || '',
                                 photoURL: data.is_avatar_empty ? null : `https://avatars.yandex.net/get-yapic/${data.default_avatar_id}/islands-200`,
                                 isYandex: true
                             };
                             setUser(yandexUser);
                             localStorage.setItem('grishka_user', JSON.stringify(yandexUser));
                             window.location.hash = '';
-                        });
+                        }).catch(e => console.error("Yandex Auth Error", e));
                 } else {
                     const saved = localStorage.getItem('grishka_user');
                     if (saved) setUser(JSON.parse(saved));
@@ -127,23 +127,20 @@
                 setError(null);
                 try {
                     const ai = new GoogleGenAI({ apiKey: "AIzaSyDvZAYpV2mCE3fy1Ni4qi5UBZv0ht71bsI" });
+                    const model = ai.getGenerativeModel({ model: "gemini-2.5-flash-image" });
                     
                     let parts = [];
                     if (attachedImage) {
                         parts.push({ inlineData: { mimeType: attachedImage.mimeType, data: attachedImage.data } });
                     }
-                    parts.push({ text: prompt || "Сгенерируй изображение на основе этого" });
+                    parts.push({ text: prompt || "Сгенерируй изображение" });
 
-                    const res = await ai.models.generateContent({
-                        model: "gemini-2.5-flash-image",
-                        contents: { parts }
-                    });
-                    
-                    const candidate = res.candidates?.[0];
-                    if (!candidate) throw new Error("Нейросеть не ответила. Попробуйте другой промт.");
+                    const res = await model.generateContent({ contents: [{ parts }] });
+                    const candidate = res.response.candidates?.[0];
+                    if (!candidate) throw new Error("Нейросеть не ответила");
                     
                     const part = candidate.content.parts.find(p => p.inlineData);
-                    if (!part) throw new Error("Изображение не создано. Попробуйте изменить описание.");
+                    if (!part) throw new Error("Изображение не создано");
                     
                     const url = `data:image/png;base64,${part.inlineData.data}`;
                     const newGen = { prompt, url, timestamp: Date.now() };
@@ -159,10 +156,15 @@
                     setStatus('SUCCESS');
                     setAttachedImage(null);
                 } catch (e) { 
-                    console.error(e);
-                    setError(e.message || "Ошибка генерации. Проверьте интернет или VPN.");
+                    setError(e.message);
                     setStatus('ERROR'); 
                 }
+            };
+
+            const handleYandex = () => {
+                const clientId = "b4abebe0dc694bbbbf328a60c3d9e6bf";
+                const redirect = "https://grishka-photos.vercel.app/";
+                window.location.href = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirect}`;
             };
 
             return html`
@@ -172,8 +174,8 @@
                         <h1 class="text-xl md:text-3xl font-extrabold tracking-tight text-center flex-1 pr-10 md:pr-0 leading-tight">
                             Сгенерируй фото <span class="italic font-medium text-slate-400">вместе с Гришкой AI</span>
                         </h1>
-                        <button onClick=${() => setShowAuth(true)} class="profile-btn bg-white border border-slate-100 shadow-sm hover:scale-105 transition-transform absolute right-0 top-1/2 -translate-y-1/2 md:static md:translate-y-0">
-                            ${user?.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : (user ? html`<div class="w-full h-full bg-black text-white flex items-center justify-center font-bold text-lg">${(user.displayName || user.email)?.[0].toUpperCase()}</div>` : ICONS.user)}
+                        <button onClick=${() => { console.log("Open Auth"); setShowAuth(true); }} class="profile-btn bg-white border border-slate-100 shadow-sm hover:scale-105 transition-transform absolute right-0 top-1/2 -translate-y-1/2 md:static md:translate-y-0">
+                            ${user?.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : (user ? html`<div class="w-full h-full bg-black text-white flex items-center justify-center font-bold text-lg">${(user.displayName || user.email || 'U')[0].toUpperCase()}</div>` : ICONS.user)}
                         </button>
                     </header>
 
@@ -228,7 +230,7 @@
                             <div class="flex flex-col items-center py-20 text-center animate-in">
                                 <div class="text-red-400 mb-4">${ICONS.alert}</div>
                                 <p class="text-red-500 font-semibold text-sm mb-6 max-w-xs">${error}</p>
-                                <button onClick=${handleGenerate} class="bg-black text-white px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest">Попробовать еще раз</button>
+                                <button onClick=${handleGenerate} class="bg-black text-white px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest">Повторить</button>
                             </div>
                         `}
 
@@ -266,7 +268,7 @@
                             ${user ? html`
                                 <div class="text-center space-y-6">
                                     <div class="w-20 h-20 md:w-24 md:h-24 rounded-full mx-auto border-4 border-slate-50 shadow-md overflow-hidden bg-black flex items-center justify-center">
-                                        ${user.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : html`<span class="text-white text-3xl font-bold">${(user.displayName || user.email)?.[0].toUpperCase()}</span>`}
+                                        ${user.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : html`<span class="text-white text-3xl font-bold">${(user.displayName || user.email || 'U')[0].toUpperCase()}</span>`}
                                     </div>
                                     <div>
                                         <p class="font-bold text-lg md:text-xl">${user.displayName || 'Пользователь'}</p>
