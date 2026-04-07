@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Гришка AI — Фотогенератор</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .animate-in { animation: fadeIn 0.3s both; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .glass-input { background: white; border: 1px solid #f1f5f9; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.05); }
+        .input-shadow { box-shadow: 0 10px 30px -10px rgba(0,0,0,0.1); }
+        .circle-btn { width: 48px; height: 48px; border-radius: 9999px !important; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .profile-btn { width: 40px; height: 40px; border-radius: 9999px !important; overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; z-index: 50; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/htm@3.1.1/dist/htm.umd.js"></script>
+    
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getFirestore, collection, addDoc, query, orderBy, limit, onSnapshot, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { GoogleGenAI } from "https://esm.run/@google/genai";
+
+        const html = htm.bind(React.createElement);
+
+        const firebaseConfig = {
+            projectId: "gen-lang-client-0020876863",
+            appId: "1:1028257117288:web:c4b079e2ccf1becbc177dd",
+            apiKey: "AIzaSyC-Ot04UT6IYPH9M0kS54srXu6eI9UgmqQ",
+            authDomain: "gen-lang-client-0020876863.firebaseapp.com",
+            firestoreDatabaseId: "ai-studio-fdfe8765-0683-4757-9205-f80f35a2bddd"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+        const ICONS = {
+            paperclip: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.51a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>`,
+            arrow: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="M5 12h14m-7-7 7 7-7 7"/></svg>`,
+            user: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>`,
+            x: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><path d="M18 6 6 18M6 6l12 12"/></svg>`,
+            refresh: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5 animate-spin"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>`,
+            image: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 opacity-10"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>`,
+            alert: html`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>`
+        };
+
+        function App() {
+            const [prompt, setPrompt] = React.useState('');
+            const [status, setStatus] = React.useState('IDLE');
+            const [result, setResult] = React.useState(null);
+            const [user, setUser] = React.useState(null);
+            const [history, setHistory] = React.useState([]);
+            const [showAuth, setShowAuth] = React.useState(false);
+            const [email, setEmail] = React.useState('');
+            const [password, setPassword] = React.useState('');
+            const [authMode, setAuthMode] = React.useState('LOGIN');
+            const [error, setError] = React.useState(null);
+            const [attachedImages, setAttachedImages] = React.useState([]);
+            const fileInputRef = React.useRef(null);
+
+            // Инициализация IndexedDB для хранения истории без лимитов
+            const openDB = () => {
+                return new Promise((resolve, reject) => {
+                    const request = indexedDB.open("GrishkaAI_DB", 1);
+                    request.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains("history")) {
+                            db.createObjectStore("history", { keyPath: "id", autoIncrement: true });
+                        }
+                    };
+                    request.onsuccess = (e) => resolve(e.target.result);
+                    request.onerror = (e) => reject(e.target.error);
+                });
+            };
+
+            const saveToLocalHistory = async (item) => {
+                try {
+                    const db = await openDB();
+                    const tx = db.transaction("history", "readwrite");
+                    const store = tx.objectStore("history");
+                    store.add(item);
+                    // Ограничим историю 20 записями для порядка
+                    const countRequest = store.count();
+                    countRequest.onsuccess = () => {
+                        if (countRequest.result > 20) {
+                            store.openCursor().onsuccess = (e) => {
+                                const cursor = e.target.result;
+                                if (cursor) {
+                                    store.delete(cursor.key);
+                                }
+                            };
+                        }
+                    };
+                } catch (e) { console.error("DB Save Error", e); }
+            };
+
+            const getLocalHistory = async () => {
+                try {
+                    const db = await openDB();
+                    return new Promise((resolve) => {
+                        const tx = db.transaction("history", "readonly");
+                        const store = tx.objectStore("history");
+                        const request = store.getAll();
+                        request.onsuccess = () => resolve(request.result.reverse());
+                    });
+                } catch (e) { return []; }
+            };
+
+            React.useEffect(() => {
+                const hash = window.location.hash;
+                if (hash.includes('access_token=')) {
+                    const token = hash.split('access_token=')[1].split('&')[0];
+                    fetch(`https://login.yandex.ru/info?format=json&oauth_token=${token}`)
+                        .then(r => r.json())
+                        .then(data => {
+                            const yandexUser = {
+                                uid: 'yandex_' + data.id,
+                                displayName: data.real_name || data.display_name || 'Пользователь Яндекса',
+                                email: data.default_email || '',
+                                photoURL: data.is_avatar_empty ? null : `https://avatars.yandex.net/get-yapic/${data.default_avatar_id}/islands-200`,
+                                isYandex: true
+                            };
+                            setUser(yandexUser);
+                            localStorage.setItem('grishka_user', JSON.stringify(yandexUser));
+                            window.location.hash = '';
+                        }).catch(e => console.error("Yandex Auth Error", e));
+                } else {
+                    const saved = localStorage.getItem('grishka_user');
+                    if (saved) setUser(JSON.parse(saved));
+                }
+
+                onAuthStateChanged(auth, (u) => {
+                    if (u) {
+                        setUser(u);
+                        localStorage.removeItem('grishka_user');
+                    }
+                });
+            }, []);
+
+            React.useEffect(() => {
+                const loadHistory = async () => {
+                    if (!user) {
+                        const local = await getLocalHistory();
+                        setHistory(local);
+                        return;
+                    }
+                    const q = query(collection(db, 'users', user.uid, 'history'), orderBy('timestamp', 'desc'), limit(12));
+                    return onSnapshot(q, (snap) => setHistory(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+                };
+                loadHistory();
+            }, [user]);
+
+            const handleFileSelect = (e) => {
+                const files = Array.from(e.target.files);
+                if (files.length === 0) return;
+                
+                files.forEach(file => {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        setAttachedImages(prev => [...prev, {
+                            id: Math.random().toString(36).substr(2, 9),
+                            mimeType: file.type,
+                            data: ev.target.result.split(',')[1],
+                            preview: ev.target.result
+                        }]);
+                    };
+                    reader.readAsDataURL(file);
+                });
+                
+                // Сбрасываем значение инпута, чтобы можно было выбрать тот же файл повторно
+                e.target.value = '';
+            };
+
+            const handleGenerate = async () => {
+                if (!prompt.trim() && attachedImages.length === 0) return;
+                setStatus('LOADING');
+                setError(null);
+                try {
+                    const apiKey = (typeof process !== 'undefined' && process.env.GEMINI_API_KEY) || "AIzaSyDvZAYpV2mCE3fy1Ni4qi5UBZv0ht71bsI";
+                    const ai = new GoogleGenAI({ apiKey });
+                    
+                    let parts = [];
+                    attachedImages.forEach(img => {
+                        parts.push({ inlineData: { mimeType: img.mimeType, data: img.data } });
+                    });
+                    parts.push({ text: prompt || "Сгенерируй качественное фото на основе описания и прикрепленных изображений" });
+
+                    const response = await ai.models.generateContent({
+                        model: "gemini-2.5-flash-image",
+                        contents: [{ parts }]
+                    });
+                    
+                    const candidate = response.candidates?.[0];
+                    if (!candidate) throw new Error("Нейросеть не вернула результат.");
+                    
+                    const part = candidate.content.parts.find(p => p.inlineData);
+                    if (!part) {
+                        const textError = candidate.content.parts.find(p => p.text)?.text;
+                        throw new Error(textError || "Изображение не создано. Попробуйте изменить запрос.");
+                    }
+                    
+                    const url = `data:image/png;base64,${part.inlineData.data}`;
+                    const newGen = { prompt, url, timestamp: Date.now() };
+                    setResult(newGen);
+
+                    if (user && !user.isYandex) {
+                        await addDoc(collection(db, 'users', user.uid, 'history'), { prompt, url, timestamp: serverTimestamp() });
+                    } else {
+                        await saveToLocalHistory(newGen);
+                        const updatedLocal = await getLocalHistory();
+                        setHistory(updatedLocal);
+                    }
+                    setStatus('SUCCESS');
+                    setAttachedImages([]);
+                    setTimeout(() => window.scrollTo({ top: 200, behavior: 'smooth' }), 100);
+                } catch (e) { 
+                    console.error("Generation Error:", e);
+                    setError(e.message || "Ошибка генерации");
+                    setStatus('ERROR'); 
+                }
+            };
+
+            const handleDownload = (url, filename) => {
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = filename || 'grishka-ai-photo.png';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            };
+
+            const copyToClipboard = (text) => {
+                navigator.clipboard.writeText(text);
+                alert('Промпт скопирован!');
+            };
+
+            const handleYandex = () => {
+                const clientId = "b4abebe0dc694bbbbf328a60c3d9e6bf";
+                const redirect = "https://grishka-photos.vercel.app/";
+                window.location.href = `https://oauth.yandex.ru/authorize?response_type=token&client_id=${clientId}&redirect_uri=${redirect}`;
+            };
+
+            return html`
+                <div class="max-w-2xl mx-auto py-8 md:py-12 px-4 md:px-6">
+                    <header class="flex items-center justify-between mb-10 md:mb-12 relative">
+                        <div class="w-10 hidden md:block"></div>
+                        <h1 class="text-xl md:text-3xl font-extrabold tracking-tight text-center flex-1 pr-10 md:pr-0 leading-tight">
+                            Сгенерируй фото <span class="italic font-medium text-slate-400">вместе с Гришкой AI</span>
+                        </h1>
+                        <button onClick=${() => setShowAuth(true)} class="profile-btn bg-white border border-slate-100 shadow-sm hover:scale-105 transition-transform absolute right-0 top-1/2 -translate-y-1/2 md:static md:translate-y-0">
+                            ${user?.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : (user ? html`<div class="w-full h-full bg-black text-white flex items-center justify-center font-bold text-lg">${(user.displayName || user.email || 'U')[0].toUpperCase()}</div>` : ICONS.user)}
+                        </button>
+                    </header>
+
+                    <div class="relative mb-12 md:mb-16">
+                        <div class="glass-input input-shadow p-1.5 rounded-full flex items-center relative">
+                            <input type="file" ref=${fileInputRef} onChange=${handleFileSelect} class="hidden" accept="image/*" multiple />
+                            <button onClick=${() => fileInputRef.current.click()} class="p-3 text-slate-300 hover:text-black transition-colors shrink-0 relative">
+                                ${ICONS.paperclip}
+                                ${attachedImages.length > 0 && html`<div class="absolute top-2 right-2 w-5 h-5 bg-black text-white text-[10px] flex items-center justify-center rounded-full border-2 border-white font-bold">${attachedImages.length}</div>`}
+                            </button>
+                            <input 
+                                value=${prompt} 
+                                onChange=${(e) => setPrompt(e.target.value)}
+                                onKeyDown=${(e) => e.key === 'Enter' && handleGenerate()}
+                                placeholder="Опиши фото мечты..." 
+                                class="flex-1 min-w-0 px-2 py-3 outline-none text-base md:text-lg font-medium placeholder:text-slate-200"
+                            />
+                            <button onClick=${handleGenerate} class="circle-btn bg-black text-white hover:opacity-80 transition-all shrink-0">
+                                ${status === 'LOADING' ? ICONS.refresh : ICONS.arrow}
+                            </button>
+                        </div>
+                        ${attachedImages.length > 0 && html`
+                            <div class="absolute -bottom-14 left-0 right-0 flex gap-3 overflow-x-auto py-2 px-4 no-scrollbar animate-in">
+                                ${attachedImages.map(img => html`
+                                    <div key=${img.id} class="relative shrink-0 group">
+                                        <div class="w-12 h-12 rounded-xl border-2 border-white overflow-hidden shadow-md bg-white">
+                                            <img src=${img.preview} class="w-full h-full object-cover" />
+                                        </div>
+                                        <button onClick=${() => setAttachedImages(prev => prev.filter(i => i.id !== img.id))} class="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-0.5 shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" class="w-3 h-3"><path d="M18 6 6 18M6 6l12 12"/></svg>
+                                        </button>
+                                    </div>
+                                `)}
+                                <button onClick=${() => setAttachedImages([])} class="shrink-0 text-[10px] font-bold text-red-400 uppercase tracking-widest hover:text-red-600 self-center ml-2">Очистить</button>
+                            </div>
+                        `}
+                    </div>
+
+                    <div class="min-h-[350px] md:min-h-[400px]">
+                        ${status === 'LOADING' && html`
+                            <div class="flex flex-col items-center py-24 animate-pulse">
+                                <div class="w-12 h-12 border-4 border-slate-100 border-t-black rounded-full animate-spin mb-6"></div>
+                                <p class="text-[10px] font-bold text-slate-300 uppercase tracking-[0.3em]">Гришка колдует...</p>
+                            </div>
+                        `}
+                        
+                        ${status === 'SUCCESS' && result && html`
+                            <div class="animate-in space-y-8">
+                                <div class="bg-white p-2 rounded-[2.5rem] shadow-2xl border border-slate-100 relative group">
+                                    <img src=${result.url} class="w-full rounded-[2rem] h-auto" />
+                                    <div class="absolute bottom-6 right-6 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button onClick=${() => handleDownload(result.url)} class="bg-white/90 backdrop-blur p-3 rounded-full shadow-lg hover:scale-110 transition-transform" title="Скачать">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                        </button>
+                                        <button onClick=${() => copyToClipboard(result.prompt)} class="bg-white/90 backdrop-blur p-3 rounded-full shadow-lg hover:scale-110 transition-transform" title="Копировать промпт">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="text-center">
+                                    <button onClick=${() => setStatus('IDLE')} class="text-[10px] font-bold text-slate-300 uppercase tracking-[0.3em] hover:text-black transition-colors">Начать заново</button>
+                                </div>
+                            </div>
+                        `}
+
+                        ${status === 'ERROR' && html`
+                            <div class="flex flex-col items-center py-20 text-center animate-in">
+                                <div class="text-red-400 mb-4">${ICONS.alert}</div>
+                                <p class="text-red-500 font-semibold text-sm mb-6 max-w-xs">${error}</p>
+                                <button onClick=${handleGenerate} class="bg-black text-white px-6 py-2 rounded-full text-xs font-bold uppercase tracking-widest">Повторить</button>
+                            </div>
+                        `}
+
+                        ${status === 'IDLE' && !result && html`
+                            <div class="grid grid-cols-2 gap-4 md:gap-6 opacity-[0.03]">
+                                <div class="aspect-square bg-black rounded-[2rem] md:rounded-[2.5rem]"></div>
+                                <div class="aspect-square bg-black rounded-[2rem] md:rounded-[2.5rem]"></div>
+                            </div>
+                        `}
+                    </div>
+
+                    ${history.length > 0 && html`
+                        <div class="mt-20 md:mt-24 border-t border-slate-100 pt-12">
+                            <h2 class="text-[10px] font-bold text-slate-300 uppercase tracking-[0.4em] mb-8 text-center">История генераций</h2>
+                            <div class="grid grid-cols-3 md:grid-cols-4 gap-3 md:gap-4">
+                                ${history.map(item => html`
+                                    <div class="relative group aspect-square bg-white rounded-2xl border border-slate-100 overflow-hidden cursor-pointer hover:border-black transition-all">
+                                        <div onClick=${() => { setPrompt(item.prompt); window.scrollTo({top: 0, behavior: 'smooth'}); }} class="w-full h-full">
+                                            ${item.url ? html`<img src=${item.url} class="w-full h-full object-cover" />` : html`<div class="w-full h-full flex items-center justify-center bg-slate-50">${ICONS.image}</div>`}
+                                        </div>
+                                        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                            <button onClick=${(e) => { e.stopPropagation(); handleDownload(item.url); }} class="p-2 bg-white rounded-full hover:scale-110 transition-transform">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                                            </button>
+                                            <button onClick=${(e) => { e.stopPropagation(); copyToClipboard(item.prompt); }} class="p-2 bg-white rounded-full hover:scale-110 transition-transform">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                `)}
+                            </div>
+                        </div>
+                    `}
+                </div>
+
+                ${showAuth && html`
+                    <div class="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-[100] animate-in">
+                        <div class="bg-white w-full max-w-md rounded-[2.5rem] md:rounded-[3rem] p-8 md:p-10 shadow-2xl relative">
+                            <button onClick=${() => setShowAuth(false)} class="absolute top-6 right-6 md:top-8 md:right-8 text-slate-300 hover:text-black transition-colors">
+                                ${ICONS.x}
+                            </button>
+                            
+                            <h2 class="text-xl md:text-2xl font-bold mb-8 md:mb-10">Личный кабинет</h2>
+                            
+                            ${user ? html`
+                                <div class="text-center space-y-6">
+                                    <div class="w-20 h-20 md:w-24 md:h-24 rounded-full mx-auto border-4 border-slate-50 shadow-md overflow-hidden bg-black flex items-center justify-center">
+                                        ${user.photoURL ? html`<img src=${user.photoURL} class="w-full h-full object-cover" />` : html`<span class="text-white text-3xl font-bold">${(user.displayName || user.email || 'U')[0].toUpperCase()}</span>`}
+                                    </div>
+                                    <div>
+                                        <p class="font-bold text-lg md:text-xl">${user.displayName || 'Пользователь'}</p>
+                                        <p class="text-slate-400 text-sm">${user.email}</p>
+                                    </div>
+                                    <button onClick=${() => { signOut(auth); setUser(null); localStorage.removeItem('grishka_user'); setShowAuth(false); }} class="w-full bg-slate-100 py-4 md:py-5 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 transition-all">Выйти из аккаунта</button>
+                                </div>
+                            ` : html`
+                                <div class="space-y-4">
+                                    <button onClick=${() => signInWithPopup(auth, new GoogleAuthProvider())} class="w-full border-2 border-slate-100 py-4 rounded-2xl font-bold flex items-center justify-center gap-4 hover:bg-slate-50 transition-all">
+                                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" class="w-6" /> Google
+                                    </button>
+                                    <button onClick=${handleYandex} class="w-full bg-[#ff0000] text-white py-4 rounded-2xl font-bold flex items-center justify-center gap-4 hover:opacity-90 transition-all">
+                                        <span class="text-xl font-black">Я</span> Яндекс ID
+                                    </button>
+                                    
+                                    <div class="relative flex items-center py-4">
+                                        <div class="flex-grow border-t border-slate-100"></div>
+                                        <span class="mx-4 text-[10px] font-bold text-slate-200 uppercase tracking-widest">или почта</span>
+                                        <div class="flex-grow border-t border-slate-100"></div>
+                                    </div>
+                                    
+                                    <input placeholder="Email" class="w-full bg-slate-50 p-4 md:p-5 rounded-2xl outline-none focus:ring-2 focus:ring-black/5" onChange=${e => setEmail(e.target.value)} />
+                                    <input type="password" placeholder="Пароль" class="w-full bg-slate-50 p-4 md:p-5 rounded-2xl outline-none focus:ring-2 focus:ring-black/5" onChange=${e => setPassword(e.target.value)} />
+                                    
+                                    <button onClick=${async () => {
+                                        try {
+                                            if (authMode === 'LOGIN') await signInWithEmailAndPassword(auth, email, password);
+                                            else await createUserWithEmailAndPassword(auth, email, password);
+                                            setShowAuth(false);
+                                        } catch (e) { alert('Ошибка: ' + e.message); }
+                                    }} class="w-full bg-black text-white py-4 md:py-5 rounded-2xl font-bold shadow-xl hover:opacity-80 transition-all">
+                                        ${authMode === 'LOGIN' ? 'Войти' : 'Зарегистрироваться'}
+                                    </button>
+                                    
+                                    <button onClick=${() => setAuthMode(authMode === 'LOGIN' ? 'SIGNUP' : 'LOGIN')} class="w-full text-[10px] font-bold text-slate-300 uppercase tracking-widest hover:text-black transition-colors">
+                                        ${authMode === 'LOGIN' ? 'Нет аккаунта? Зарегистрироваться' : 'Уже есть аккаунт? Войти'}
+                                    </button>
+                                </div>
+                            `}
+                        </div>
+                    </div>
+                `}
+                <footer class="py-12 text-center opacity-20 text-[9px] font-bold uppercase tracking-[0.5em]">© 2024 Grishka AI</footer>
+            `;
+        }
+
+        ReactDOM.createRoot(document.getElementById('root')).render(html`<${App} />`);
+    </script>
+</body>
+</html>
